@@ -1,0 +1,11 @@
+[package]
+name = "watchsat"
+version = "0.1.0"
+authors = ["Riccardo De Benedictis"]
+edition = "2024"
+description = "A high-performance CDCL SAT engine with Two-Watched Literals in Rust."
+readme = "README.md"
+repository = "https://github.com/ratioSolver/Consensus"
+license-file = "LICENSE.txt"
+
+[dependencies]
