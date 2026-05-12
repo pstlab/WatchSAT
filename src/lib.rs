@@ -86,7 +86,7 @@ impl Engine {
         Ok(())
     }
 
-    fn enqueue(&mut self, lit: Lit, reason: Option<ClauseId>) -> bool {
+    fn enqueue(&mut self, lit: Lit, _reason: Option<ClauseId>) -> bool {
         match self.value(lit.var()) {
             LBool::True => lit.is_positive(),
             LBool::False => !lit.is_positive(),
