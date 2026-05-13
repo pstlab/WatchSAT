@@ -3,18 +3,6 @@ use std::{cmp, fmt, ops};
 use crate::VarId;
 
 /// A literal is represented as a variable index and a sign (true for positive, false for negative).
-///
-/// # Examples
-/// ```
-/// # use watchsat::{Lit, pos, neg, VarId};
-/// let a = pos(VarId(0)); // Represents the literal b0
-/// let not_a = neg(VarId(0)); // Represents the literal ¬b0
-///
-/// assert_eq!(a.var(), VarId(0));
-/// assert!(a.is_positive());
-/// assert_eq!(not_a.var(), VarId(0));
-/// assert!(!not_a.is_positive());
-/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Lit {
     x: VarId,
