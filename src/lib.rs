@@ -155,12 +155,20 @@ impl Engine {
     ///
     /// For unit clauses, assignment is attempted immediately.
     ///
+    /// For non-unit clauses, literals are kept as provided, but insertion is
+    /// evaluated under the current assignment:
+    /// - if all literals are currently false, insertion fails with conflict;
+    /// - if exactly one literal is not false and none is true, that literal is
+    ///   enqueued immediately (unit under current assignment);
+    /// - if at least one literal is already true, the clause is inserted with
+    ///   no immediate propagation side effects.
+    ///
     /// # Errors
     ///
     /// Returns [`PropagationError::Conflict`] when inserting an empty clause or
     /// when a unit clause contradicts current assignments.
     pub fn add_clause(&mut self, lits: impl IntoIterator<Item = Lit>) -> Result<(), PropagationError> {
-        let lits = lits.into_iter().collect::<Vec<_>>();
+        let mut lits = lits.into_iter().collect::<Vec<_>>();
         if lits.is_empty() {
             return Err(PropagationError::Conflict { clause: vec![] });
         } else if lits.len() == 1 {
@@ -168,6 +176,42 @@ impl Engine {
                 return Err(PropagationError::Conflict { clause: lits });
             }
             return Ok(());
+        }
+
+        let mut true_lits = Vec::new();
+        let mut non_false_lits = Vec::new();
+        for (idx, lit) in lits.iter().enumerate() {
+            match self.lit_value(lit) {
+                LBool::True => {
+                    true_lits.push(idx);
+                    non_false_lits.push(idx);
+                }
+                LBool::Undef => non_false_lits.push(idx),
+                LBool::False => {}
+            }
+        }
+
+        if non_false_lits.is_empty() {
+            return Err(PropagationError::Conflict { clause: lits });
+        }
+
+        let first_watch = non_false_lits[0];
+        let second_watch = if non_false_lits.len() > 1 {
+            non_false_lits[1]
+        } else if first_watch == 0 {
+            1
+        } else {
+            0
+        };
+        let mut second = second_watch;
+        if first_watch != 0 {
+            lits.swap(0, first_watch);
+            if second == 0 {
+                second = first_watch;
+            }
+        }
+        if second != 1 {
+            lits.swap(1, second);
         }
 
         let clause_id = self.clauses.len();
@@ -179,6 +223,11 @@ impl Engine {
             }
         }
         self.clauses.push(Clause { lits });
+
+        if true_lits.is_empty() && non_false_lits.len() == 1 && !self.enqueue(self.clauses[clause_id].lits[0], Some(ClauseId(clause_id))) {
+            return Err(PropagationError::Conflict { clause: self.clauses[clause_id].lits.clone() });
+        }
+
         Ok(())
     }
 
@@ -964,5 +1013,46 @@ mod tests {
         // Test that Engine::default() works
         let engine = Engine::default();
         assert_eq!(engine.value(VarId(0)), LBool::True); // Variable 0 is forced to True in new()
+    }
+
+    #[test]
+    fn test_add_clause_detects_immediate_conflict_under_current_assignment() {
+        let mut engine = Engine::new();
+        let a = engine.add_var();
+        let b = engine.add_var();
+
+        engine.assert(neg(a)).unwrap();
+        engine.assert(neg(b)).unwrap();
+
+        let result = engine.add_clause(vec![pos(a), pos(b)]);
+        assert!(result.is_err(), "Clause should conflict when all literals are already false");
+    }
+
+    #[test]
+    fn test_add_clause_performs_immediate_unit_propagation_under_current_assignment() {
+        let mut engine = Engine::new();
+        let a = engine.add_var();
+        let b = engine.add_var();
+        let c = engine.add_var();
+
+        engine.assert(neg(a)).unwrap();
+        engine.assert(neg(b)).unwrap();
+        engine.add_clause(vec![pos(a), pos(b), pos(c)]).unwrap();
+
+        assert_eq!(engine.value(c), LBool::True, "c should be propagated immediately as the only non-false literal");
+    }
+
+    #[test]
+    fn test_add_clause_keeps_satisfied_clause_without_side_effects() {
+        let mut engine = Engine::new();
+        let a = engine.add_var();
+        let b = engine.add_var();
+        let c = engine.add_var();
+
+        engine.assert(pos(a)).unwrap();
+        engine.assert(neg(b)).unwrap();
+        engine.add_clause(vec![pos(a), pos(b), pos(c)]).unwrap();
+
+        assert_eq!(engine.value(c), LBool::Undef, "Adding an already satisfied clause should not force unrelated literals");
     }
 }
