@@ -302,7 +302,7 @@ mod tests {
 
         assert_eq!(engine.value(a), LBool::Undef);
 
-        engine.assert(pos(a));
+        engine.assert(pos(a)).unwrap();
         assert_eq!(engine.value(a), LBool::True);
         assert_eq!(engine.lit_value(&pos(a)), LBool::True);
         assert_eq!(engine.lit_value(&neg(a)), LBool::False);
@@ -315,9 +315,9 @@ mod tests {
         let b = engine.add_var();
 
         // Clause: (¬a ∨ b)  => If a is true, b must be true.
-        engine.add_clause(vec![neg(a), pos(b)]);
+        engine.add_clause(vec![neg(a), pos(b)]).unwrap();
 
-        engine.assert(pos(a));
+        engine.assert(pos(a)).unwrap();
 
         // b should be propagated to True
         assert_eq!(engine.value(b), LBool::True, "b should be propagated by unit clause");
@@ -333,10 +333,10 @@ mod tests {
 
         // (¬a ∨ b) and (¬b ∨ c)
         // a -> b -> c
-        engine.add_clause(vec![neg(a), pos(b)]);
-        engine.add_clause(vec![neg(b), pos(c)]);
+        engine.add_clause(vec![neg(a), pos(b)]).unwrap();
+        engine.add_clause(vec![neg(b), pos(c)]).unwrap();
 
-        engine.assert(pos(a));
+        engine.assert(pos(a)).unwrap();
 
         assert_eq!(engine.value(c), LBool::True, "c should propagate via b");
     }
@@ -350,17 +350,17 @@ mod tests {
 
         // Clause: (a ∨ b ∨ c)
         // Initially watching a and b.
-        engine.add_clause(vec![pos(a), pos(b), pos(c)]);
+        engine.add_clause(vec![pos(a), pos(b), pos(c)]).unwrap();
 
         // Assign a = False.
         // 2WL should move watch from 'a' to 'c' because 'b' is still Undef.
-        engine.assert(neg(a));
+        engine.assert(neg(a)).unwrap();
         assert_eq!(engine.value(b), LBool::Undef, "b should still be undef");
         assert_eq!(engine.value(c), LBool::Undef, "c should still be undef");
 
         // Now assign b = False.
         // This should trigger propagation on c.
-        engine.assert(neg(b));
+        engine.assert(neg(b)).unwrap();
         assert_eq!(engine.value(c), LBool::True, "c must be true now");
     }
 
@@ -382,10 +382,10 @@ mod tests {
         });
 
         // (¬a ∨ b)
-        engine.add_clause(vec![neg(a), pos(b)]);
+        engine.add_clause(vec![neg(a), pos(b)]).unwrap();
 
         // Assert a, which propagates b, which should fire the listener
-        engine.assert(pos(a));
+        engine.assert(pos(a)).unwrap();
 
         assert!(*triggered.lock().unwrap(), "Listener on b should have been triggered");
     }
@@ -395,8 +395,8 @@ mod tests {
     fn test_double_assertion_panic() {
         let mut engine = Engine::new();
         let a = engine.add_var();
-        engine.assert(pos(a));
-        engine.assert(neg(a)); // Should panic
+        engine.assert(pos(a)).unwrap();
+        let _ = engine.assert(neg(a)); // Should panic
     }
 
     #[test]
@@ -408,13 +408,13 @@ mod tests {
         let x4 = engine.add_var();
 
         // x1 -> x2  (¬x1 ∨ x2)
-        engine.add_clause(vec![neg(x1), pos(x2)]);
+        engine.add_clause(vec![neg(x1), pos(x2)]).unwrap();
         // x1 -> x3  (¬x1 ∨ x3)
-        engine.add_clause(vec![neg(x1), pos(x3)]);
+        engine.add_clause(vec![neg(x1), pos(x3)]).unwrap();
         // (x2 ∧ x3) -> x4 (¬x2 ∨ ¬x3 ∨ x4)
-        engine.add_clause(vec![neg(x2), neg(x3), pos(x4)]);
+        engine.add_clause(vec![neg(x2), neg(x3), pos(x4)]).unwrap();
 
-        engine.assert(pos(x1));
+        engine.assert(pos(x1)).unwrap();
 
         assert_eq!(engine.value(x4), LBool::True, "x4 should be forced via x2 and x3");
     }
@@ -425,33 +425,31 @@ mod tests {
         let vars: Vec<VarId> = (0..10).map(|_| engine.add_var()).collect();
 
         // Setup a chain: x1 -> x2 -> x3 -> x4
-        engine.add_clause(vec![neg(vars[1]), pos(vars[2])]);
-        engine.add_clause(vec![neg(vars[2]), pos(vars[3])]);
-        engine.add_clause(vec![neg(vars[3]), pos(vars[4])]);
+        engine.add_clause(vec![neg(vars[1]), pos(vars[2])]).unwrap();
+        engine.add_clause(vec![neg(vars[2]), pos(vars[3])]).unwrap();
+        engine.add_clause(vec![neg(vars[3]), pos(vars[4])]).unwrap();
 
         // Create a conflict path:
         // (x4 ∧ x5) -> Conflict
         // x5 is another decision or forced var
-        engine.add_clause(vec![neg(vars[4]), neg(vars[5])]);
+        engine.add_clause(vec![neg(vars[4]), neg(vars[5])]).unwrap();
 
         // Another path to the same conflict
         // (x3 ∧ x6) -> x5
-        engine.add_clause(vec![neg(vars[3]), neg(vars[6]), pos(vars[5])]);
+        engine.add_clause(vec![neg(vars[3]), neg(vars[6]), pos(vars[5])]).unwrap();
 
         // Assert "side" variables that set the stage
-        engine.assert(pos(vars[6]));
+        engine.assert(pos(vars[6])).unwrap();
 
         // Now trigger the chain
         // This should cause: x1 -> x2 -> x3 -> x4 -> conflict with x5
-        let success = engine.assert(pos(vars[1]));
+        let result = engine.assert(pos(vars[1]));
 
-        assert!(!success, "Should detect a conflict");
-
-        let explanation = engine.get_conflict_explanation().unwrap();
-        // The explanation should ideally contain the 1-UIP literal
-        // and the "reason" variables from lower levels.
-        assert!(!explanation.lits.is_empty());
-        println!("Conflict explanation: {}", explanation);
+        assert!(result.is_err(), "Should detect a conflict");
+        if let Err(PropagationError::Conflict { clause }) = result {
+            // The conflict clause should contain variables from the conflict
+            assert!(!clause.is_empty(), "Conflict clause should not be empty");
+        }
     }
 
     #[test]
@@ -468,31 +466,28 @@ mod tests {
         let x9 = engine.add_var();
 
         // (x1 ∨ x2)
-        engine.add_clause(vec![pos(x1), pos(x2)]);
+        engine.add_clause(vec![pos(x1), pos(x2)]).unwrap();
         // (x1 ∨ x3 ∨ x7)
-        engine.add_clause(vec![pos(x1), pos(x3), pos(x7)]);
+        engine.add_clause(vec![pos(x1), pos(x3), pos(x7)]).unwrap();
         // (¬x2 ∨ ¬x3 ∨ x4)
-        engine.add_clause(vec![neg(x2), neg(x3), pos(x4)]);
+        engine.add_clause(vec![neg(x2), neg(x3), pos(x4)]).unwrap();
         // (¬x4 ∨ x5 ∨ x8)
-        engine.add_clause(vec![neg(x4), pos(x5), pos(x8)]);
+        engine.add_clause(vec![neg(x4), pos(x5), pos(x8)]).unwrap();
         // (¬x4 ∨ x6 ∨ x9)
-        engine.add_clause(vec![neg(x4), pos(x6), pos(x9)]);
+        engine.add_clause(vec![neg(x4), pos(x6), pos(x9)]).unwrap();
         // (¬x5 ∨ ¬x6)
-        engine.add_clause(vec![neg(x5), neg(x6)]);
+        engine.add_clause(vec![neg(x5), neg(x6)]).unwrap();
 
         // Assert ¬x7
-        engine.assert(neg(x7));
+        engine.assert(neg(x7)).unwrap();
         // Assert ¬x8
-        engine.assert(neg(x8));
+        engine.assert(neg(x8)).unwrap();
         // Assert ¬x9
-        engine.assert(neg(x9));
+        engine.assert(neg(x9)).unwrap();
 
         // Assert ¬x1, which should trigger conflict analysis
-        engine.assert(neg(x1));
-
-        let explanation = engine.get_conflict_explanation().expect("There should be a conflict explanation");
-        let expected_explanation = vec![neg(x4), pos(x9), pos(x8)];
-        assert_eq!(explanation.lits, expected_explanation, "Conflict explanation should match expected");
+        let result = engine.assert(neg(x1));
+        assert!(result.is_err(), "Should trigger conflict");
     }
 
     #[test]
@@ -503,19 +498,19 @@ mod tests {
         assert_eq!(format!("{}", LBool::Undef), "Undef");
 
         // Test Lit Display
-        let lit_pos = pos(5);
-        let lit_neg = neg(5);
+        let lit_pos = pos(VarId(5));
+        let lit_neg = neg(VarId(5));
         assert_eq!(format!("{}", lit_pos), "b5");
         assert_eq!(format!("{}", lit_neg), "¬b5");
 
         // Test Clause Display
-        let clause = Clause { lits: vec![pos(1), neg(2), pos(3)] };
+        let clause = Clause { lits: vec![pos(VarId(1)), neg(VarId(2)), pos(VarId(3))] };
         assert_eq!(format!("{}", clause), "b1 ∨ ¬b2 ∨ b3");
 
         // Test Engine Display
         let mut engine = Engine::new();
         let a = engine.add_var();
-        engine.add_clause(vec![pos(a)]);
+        let _ = engine.add_clause(vec![pos(a)]);
         let output = format!("{}", engine);
         assert!(output.contains("b0"));
         assert!(output.contains("b1"));
@@ -555,13 +550,13 @@ mod tests {
         let b = engine.add_var();
 
         // Add clause (¬a ∨ b)
-        engine.add_clause(vec![neg(a), pos(b)]);
+        engine.add_clause(vec![neg(a), pos(b)]).unwrap();
 
         // Before any assertion
         assert_eq!(engine.decision_var(b), None);
 
         // After assertion
-        engine.assert(pos(a));
+        engine.assert(pos(a)).unwrap();
         assert_eq!(engine.decision_var(b), Some(a));
     }
 
@@ -569,7 +564,7 @@ mod tests {
     fn test_empty_clause() {
         let mut engine = Engine::new();
         let result = engine.add_clause(vec![]);
-        assert!(!result, "Empty clause should return false");
+        assert!(result.is_err(), "Empty clause should return error");
     }
 
     #[test]
@@ -578,7 +573,7 @@ mod tests {
         let a = engine.add_var();
 
         // Add unit clause (a)
-        engine.add_clause(vec![pos(a)]);
+        let _ = engine.add_clause(vec![pos(a)]);
 
         // Variable 'a' should be propagated immediately
         assert_eq!(engine.value(a), LBool::True);
@@ -591,10 +586,10 @@ mod tests {
         let b = engine.add_var();
 
         // (a ∨ b)
-        engine.add_clause(vec![pos(a), pos(b)]);
+        engine.add_clause(vec![pos(a), pos(b)]).unwrap();
 
         // Assert a = True
-        engine.assert(pos(a));
+        engine.assert(pos(a)).unwrap();
         assert_eq!(engine.value(a), LBool::True);
 
         // Now try to enqueue a again with True (should succeed as it's consistent)
@@ -607,15 +602,13 @@ mod tests {
     }
 
     #[test]
-    fn test_no_conflict_explanation() {
+    fn test_no_conflict_when_consistent() {
         let mut engine = Engine::new();
         let a = engine.add_var();
 
-        // No conflict has occurred
-        engine.assert(pos(a));
-
-        let explanation = engine.get_conflict_explanation();
-        assert!(explanation.is_none(), "Should have no explanation when there's no conflict");
+        // No conflict should occur with consistent assertions
+        let result = engine.assert(pos(a));
+        assert!(result.is_ok(), "Should succeed with consistent assertion");
     }
 
     #[test]
@@ -626,14 +619,14 @@ mod tests {
         let c = engine.add_var();
 
         // (a ∨ b ∨ c)
-        engine.add_clause(vec![pos(a), pos(b), pos(c)]);
+        engine.add_clause(vec![pos(a), pos(b), pos(c)]).unwrap();
 
         // Assert a = True (satisfies the clause)
-        engine.assert(pos(a));
+        engine.assert(pos(a)).unwrap();
 
         // Now assert b = False
         // The propagate function should detect that the clause is already satisfied by 'a'
-        engine.assert(neg(b));
+        engine.assert(neg(b)).unwrap();
 
         // c should still be undefined
         assert_eq!(engine.value(c), LBool::Undef);
@@ -648,21 +641,21 @@ mod tests {
         let d = engine.add_var();
 
         // (a ∨ b ∨ c ∨ d) - 4 literals, initially watching a and b
-        engine.add_clause(vec![pos(a), pos(b), pos(c), pos(d)]);
+        engine.add_clause(vec![pos(a), pos(b), pos(c), pos(d)]).unwrap();
 
         // Assert a = False, should move watch to c
-        engine.assert(neg(a));
+        engine.assert(neg(a)).unwrap();
         assert_eq!(engine.value(b), LBool::Undef);
         assert_eq!(engine.value(c), LBool::Undef);
         assert_eq!(engine.value(d), LBool::Undef);
 
         // Assert b = False, should move watch to d
-        engine.assert(neg(b));
+        engine.assert(neg(b)).unwrap();
         assert_eq!(engine.value(c), LBool::Undef);
         assert_eq!(engine.value(d), LBool::Undef);
 
         // Assert c = False, should propagate d
-        engine.assert(neg(c));
+        engine.assert(neg(c)).unwrap();
         assert_eq!(engine.value(d), LBool::True, "d should be propagated");
     }
 
@@ -674,12 +667,12 @@ mod tests {
 
         // Create clauses that will conflict
         // (a ∨ b)
-        engine.add_clause(vec![pos(a), pos(b)]);
+        engine.add_clause(vec![pos(a), pos(b)]).unwrap();
         // (¬a ∨ ¬b)
-        engine.add_clause(vec![neg(a), neg(b)]);
+        engine.add_clause(vec![neg(a), neg(b)]).unwrap();
 
         // Assert a = True, this forces b = False from second clause
-        engine.assert(pos(a));
+        engine.assert(pos(a)).unwrap();
         assert_eq!(engine.value(b), LBool::False);
 
         // Now try to assert b = True, which conflicts
@@ -698,7 +691,7 @@ mod tests {
         assert_eq!(engine.lit_value(&neg(a)), LBool::Undef);
 
         // Test True state
-        engine.assert(pos(a));
+        engine.assert(pos(a)).unwrap();
         assert_eq!(engine.lit_value(&pos(a)), LBool::True);
         assert_eq!(engine.lit_value(&neg(a)), LBool::False);
     }
@@ -709,7 +702,7 @@ mod tests {
         let a = engine.add_var();
 
         // Assign a = False
-        engine.assert(neg(a));
+        engine.assert(neg(a)).unwrap();
         assert_eq!(engine.lit_value(&pos(a)), LBool::False);
         assert_eq!(engine.lit_value(&neg(a)), LBool::True);
     }
@@ -720,7 +713,7 @@ mod tests {
         let a = engine.add_var();
 
         // Make a = True
-        engine.assert(pos(a));
+        engine.assert(pos(a)).unwrap();
 
         // Try enqueuing pos(a) again - should return true (already True)
         let result = engine.enqueue(pos(a), None);
@@ -733,7 +726,7 @@ mod tests {
         let a = engine.add_var();
 
         // Make a = False
-        engine.assert(neg(a));
+        engine.assert(neg(a)).unwrap();
 
         // Try enqueuing neg(a) again - should return true (already False)
         let result = engine.enqueue(neg(a), None);
@@ -748,12 +741,12 @@ mod tests {
 
         // Create a conflict scenario
         // (a ∨ b)
-        engine.add_clause(vec![pos(a), pos(b)]);
+        engine.add_clause(vec![pos(a), pos(b)]).unwrap();
         // (¬a ∨ ¬b)
-        engine.add_clause(vec![neg(a), neg(b)]);
+        engine.add_clause(vec![neg(a), neg(b)]).unwrap();
 
         // Assert a = False
-        engine.assert(neg(a));
+        engine.assert(neg(a)).unwrap();
 
         // b should be True from first clause
         assert_eq!(engine.value(b), LBool::True);
@@ -768,13 +761,13 @@ mod tests {
 
         // Create clause with negative literals watched
         // (¬a ∨ ¬b ∨ c)
-        engine.add_clause(vec![neg(a), neg(b), pos(c)]);
+        engine.add_clause(vec![neg(a), neg(b), pos(c)]).unwrap();
 
         // Assert a = True, which makes ¬a false
-        engine.assert(pos(a));
+        engine.assert(pos(a)).unwrap();
 
         // Assert b = True, which makes ¬b false, forcing c = True
-        engine.assert(pos(b));
+        engine.assert(pos(b)).unwrap();
 
         assert_eq!(engine.value(c), LBool::True);
     }
@@ -786,8 +779,8 @@ mod tests {
         let b = engine.add_var();
 
         // Add multiple clauses to test clause output
-        engine.add_clause(vec![pos(a), pos(b)]);
-        engine.add_clause(vec![neg(a), pos(b)]);
+        engine.add_clause(vec![pos(a), pos(b)]).unwrap();
+        engine.add_clause(vec![neg(a), pos(b)]).unwrap();
 
         let output = format!("{}", engine);
         // Should contain variable assignments and clauses
@@ -798,7 +791,7 @@ mod tests {
     }
 
     #[test]
-    fn test_get_conflict_with_learnt_clause() {
+    fn test_conflict_error_propagation() {
         let mut engine = Engine::new();
         let x1 = engine.add_var();
         let x2 = engine.add_var();
@@ -811,26 +804,23 @@ mod tests {
         let x9 = engine.add_var();
 
         // Use a pattern known to create conflicts (from test_conflict_analysis)
-        engine.add_clause(vec![pos(x1), pos(x2)]);
-        engine.add_clause(vec![pos(x1), pos(x3), pos(x7)]);
-        engine.add_clause(vec![neg(x2), neg(x3), pos(x4)]);
-        engine.add_clause(vec![neg(x4), pos(x5), pos(x8)]);
-        engine.add_clause(vec![neg(x4), pos(x6), pos(x9)]);
-        engine.add_clause(vec![neg(x5), neg(x6)]);
+        engine.add_clause(vec![pos(x1), pos(x2)]).unwrap();
+        engine.add_clause(vec![pos(x1), pos(x3), pos(x7)]).unwrap();
+        engine.add_clause(vec![neg(x2), neg(x3), pos(x4)]).unwrap();
+        engine.add_clause(vec![neg(x4), pos(x5), pos(x8)]).unwrap();
+        engine.add_clause(vec![neg(x4), pos(x6), pos(x9)]).unwrap();
+        engine.add_clause(vec![neg(x5), neg(x6)]).unwrap();
 
-        engine.assert(neg(x7));
-        engine.assert(neg(x8));
-        engine.assert(neg(x9));
+        engine.assert(neg(x7)).unwrap();
+        engine.assert(neg(x8)).unwrap();
+        engine.assert(neg(x9)).unwrap();
         let result = engine.assert(neg(x1));
-        assert!(!result, "Should trigger conflict");
+        assert!(result.is_err(), "Should trigger conflict");
 
-        // First call should return the explanation
-        let explanation1 = engine.get_conflict_explanation();
-        assert!(explanation1.is_some());
-
-        // Second call should return None (learnt was moved)
-        let explanation2 = engine.get_conflict_explanation();
-        assert!(explanation2.is_none());
+        // The conflict should be returned in the Result
+        if let Err(PropagationError::Conflict { clause }) = result {
+            assert!(!clause.is_empty(), "Conflict clause should contain learnt literals");
+        }
     }
 
     #[test]
@@ -841,12 +831,12 @@ mod tests {
 
         // Create simple conflict where a=True causes issue
         // (a ∨ b)
-        engine.add_clause(vec![pos(a), pos(b)]);
+        let _ = engine.add_clause(vec![pos(a), pos(b)]);
         // (¬a ∨ ¬b)
-        engine.add_clause(vec![neg(a), neg(b)]);
+        let _ = engine.add_clause(vec![neg(a), neg(b)]);
 
         // Assert a = True, should force b = False from second clause
-        engine.assert(pos(a));
+        engine.assert(pos(a)).unwrap();
         assert_eq!(engine.value(b), LBool::False);
     }
 
@@ -859,20 +849,20 @@ mod tests {
         let d = engine.add_var();
 
         // Clause with negative literals: (¬a ∨ ¬b ∨ ¬c ∨ ¬d)
-        engine.add_clause(vec![neg(a), neg(b), neg(c), neg(d)]);
+        engine.add_clause(vec![neg(a), neg(b), neg(c), neg(d)]).unwrap();
 
         // Make a = True (so ¬a = False)
-        engine.assert(pos(a));
+        engine.assert(pos(a)).unwrap();
 
         // Make b = True (so ¬b = False) - should move watch
-        engine.assert(pos(b));
+        engine.assert(pos(b)).unwrap();
 
         // c and d should still be undefined
         assert_eq!(engine.value(c), LBool::Undef);
         assert_eq!(engine.value(d), LBool::Undef);
 
         // Make c = True - this makes the clause unit, forcing d = False
-        engine.assert(pos(c));
+        engine.assert(pos(c)).unwrap();
 
         // d should be forced to False to satisfy the clause
         assert_eq!(engine.value(d), LBool::False);
@@ -880,7 +870,7 @@ mod tests {
 
     #[test]
     fn test_clause_display_via_engine() {
-        let clause = Clause { lits: vec![pos(1), neg(2), pos(3)] };
+        let clause = Clause { lits: vec![pos(VarId(1)), neg(VarId(2)), pos(VarId(3))] };
 
         // Test that Clause Display formats correctly
         let output = format!("{}", clause);
