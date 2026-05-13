@@ -1,3 +1,27 @@
+//! # SAT Solver Engine
+//!
+//! This module provides a core CDCL (Conflict-Driven Clause Learning) engine
+//! utilizing the Two-Watched Literal (2WL) scheme for efficient unit propagation.
+//!
+//! ## Core Logic
+//! The engine works by:
+//! 1. **Assignment**: Values are assigned to variables via `assert`.
+//! 2. **Propagation**: The engine uses watch lists to find unit clauses.
+//! 3. **Conflict Analysis**: If a contradiction is found, the engine performs
+//!    1-UIP (Unique Implication Point) analysis to learn a new clause.
+//!
+//! ## Example
+//! ```rust
+//! # use watchsat::{Engine, pos, neg};
+//! let mut engine = Engine::new();
+//! let a = engine.add_var();
+//! let b = engine.add_var();
+//! engine.add_clause(vec![neg(a), pos(b)]); // (¬a ∨ b)
+//! engine.assert(pos(a));                   // Forces b to be True
+//! ```
+//!
+//! The API is intentionally low-level and focused on building blocks that can
+//! be embedded in higher-level planning or verification systems.
 mod clause;
 mod lbool;
 mod lit;
@@ -15,6 +39,21 @@ pub use var::VarId;
 
 type Callback = Box<dyn Fn(VarId, LBool)>;
 
+/// A CDCL-based SAT engine.
+///
+/// The `Engine` manages variable assignments, watch lists for unit propagation,
+/// and performs conflict analysis to learn new clauses.
+///
+/// # Examples
+/// ```
+/// # use watchsat::{Engine, pos, neg, LBool};
+/// let mut engine = Engine::new();
+/// let a = engine.add_var();
+/// let b = engine.add_var();
+/// engine.add_clause(vec![neg(a), pos(b)]); // (¬a ∨ b)
+/// engine.assert(pos(a));                   // Forces b to be True
+/// assert_eq!(engine.value(b), LBool::True, "b should be propagated by unit clause");
+/// ```
 pub struct Engine {
     assigns: Vec<LBool>,                      // Current assignments of variables
     reason: Vec<Option<ClauseId>>,            // Reason for each variable's assignment
@@ -36,10 +75,17 @@ impl Default for Engine {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PropagationError {
+    /// Propagation or insertion produced an unsatisfied clause.
+    ///
+    /// The payload contains a clause explaining the conflict.
     Conflict { clause: Vec<Lit> },
 }
 
 impl Engine {
+    /// Creates an empty SAT engine.
+    ///
+    /// A reserved internal variable is created at index `0` so that
+    /// [`TRUE_LIT`] and [`FALSE_LIT`] always have a defined value.
     pub fn new() -> Self {
         let mut e = Engine {
             assigns: Vec::new(),
@@ -58,6 +104,7 @@ impl Engine {
         e
     }
 
+    /// Adds a fresh variable and returns its identifier.
     pub fn add_var(&mut self) -> VarId {
         let var_id = self.assigns.len();
         self.assigns.push(LBool::default());
@@ -68,10 +115,14 @@ impl Engine {
         VarId(var_id)
     }
 
+    /// Returns the current assignment of a variable.
     pub fn value(&self, var: VarId) -> LBool {
         self.assigns[var.0].clone()
     }
 
+    /// Returns the current value of a literal under the current assignment.
+    ///
+    /// If the variable is unassigned, the result is [`LBool::Undef`].
     pub fn lit_value(&self, lit: &Lit) -> LBool {
         match self.value(lit.var()) {
             LBool::True => {
@@ -92,10 +143,22 @@ impl Engine {
         }
     }
 
+    /// Returns the decision variable that implied `var`, if any.
+    ///
+    /// `None` means either `var` is unassigned, or it was set directly as a
+    /// decision variable rather than by implication.
     pub fn decision_var(&self, var: VarId) -> Option<VarId> {
         self.decision_vars[var.0]
     }
 
+    /// Adds a clause to the formula.
+    ///
+    /// For unit clauses, assignment is attempted immediately.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PropagationError::Conflict`] when inserting an empty clause or
+    /// when a unit clause contradicts current assignments.
     pub fn add_clause(&mut self, lits: impl IntoIterator<Item = Lit>) -> Result<(), PropagationError> {
         let lits = lits.into_iter().collect::<Vec<_>>();
         if lits.is_empty() {
@@ -119,6 +182,19 @@ impl Engine {
         Ok(())
     }
 
+    /// Asserts a decision literal and runs propagation.
+    ///
+    /// This performs watched-literal propagation and may trigger conflict
+    /// analysis (1-UIP) to return a learnt clause.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the variable of `lit` is already assigned.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PropagationError::Conflict`] when propagation derives a
+    /// contradiction. The returned clause is the analyzed learnt clause.
     pub fn assert(&mut self, lit: Lit) -> Result<(), PropagationError> {
         assert!(self.value(lit.var()) == LBool::Undef, "Variable b{} is already assigned", lit.var());
         self.decision_var = lit.var();
@@ -225,6 +301,9 @@ impl Engine {
         learnt
     }
 
+    /// Clears the assignment of `var` and its implication metadata.
+    ///
+    /// This is mainly used internally during conflict analysis.
     pub fn undo(&mut self, var: VarId) {
         self.assigns[var.0] = LBool::Undef;
         self.reason[var.0] = None;
@@ -271,6 +350,9 @@ impl Engine {
         self.enqueue(self.clauses[clause_id.0].lits[0], Some(clause_id))
     }
 
+    /// Registers a callback invoked when `var` gets assigned.
+    ///
+    /// Listeners are called synchronously during propagation/assertion.
     pub fn add_listener<F>(&mut self, var: VarId, listener: F)
     where
         F: Fn(VarId, LBool) + 'static,

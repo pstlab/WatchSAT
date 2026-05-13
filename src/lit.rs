@@ -28,6 +28,8 @@ pub const FALSE_LIT: Lit = Lit { x: VarId(0), sign: false };
 
 impl Lit {
     /// Creates a literal from a variable index and a sign.
+    ///
+    /// `sign = true` means positive literal, `sign = false` means negated literal.
     pub fn new(x: VarId, sign: bool) -> Self {
         Lit { x, sign }
     }
@@ -65,6 +67,8 @@ pub fn neg(x: VarId) -> Lit {
 
 impl Default for Lit {
     /// Returns a sentinel literal with an invalid variable index.
+    ///
+    /// This value is used internally as a temporary placeholder.
     fn default() -> Self {
         Lit { x: VarId(usize::MAX), sign: false }
     }
