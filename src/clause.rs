@@ -1,8 +1,22 @@
 use crate::Lit;
-use std::fmt;
+use std::{fmt, ops::Deref};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(super) struct ClauseId(pub(super) usize);
+pub(super) struct ClauseId(usize);
+
+impl ClauseId {
+    pub(crate) const fn new(index: usize) -> Self {
+        ClauseId(index)
+    }
+}
+
+impl Deref for ClauseId {
+    type Target = usize;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 impl fmt::Display for ClauseId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

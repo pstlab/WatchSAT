@@ -92,7 +92,7 @@ impl Engine {
             reason: Vec::new(),
             propagated_vars: Vec::new(),
             decision_vars: Vec::new(),
-            decision_var: VarId(usize::MAX), // No decision variable at the start
+            decision_var: VarId::new(usize::MAX), // No decision variable at the start
             pos_watches: Vec::new(),
             neg_watches: Vec::new(),
             clauses: Vec::new(),
@@ -112,12 +112,12 @@ impl Engine {
         self.decision_vars.push(None);
         self.pos_watches.push(Vec::new());
         self.neg_watches.push(Vec::new());
-        VarId(var_id)
+        VarId::new(var_id)
     }
 
     /// Returns the current assignment of a variable.
     pub fn value(&self, var: VarId) -> LBool {
-        self.assigns[var.0].clone()
+        self.assigns[*var].clone()
     }
 
     /// Returns the current value of a literal under the current assignment.
@@ -148,7 +148,7 @@ impl Engine {
     /// `None` means either `var` is unassigned, or it was set directly as a
     /// decision variable rather than by implication.
     pub fn decision_var(&self, var: VarId) -> Option<VarId> {
-        self.decision_vars[var.0]
+        self.decision_vars[*var]
     }
 
     /// Adds a clause to the formula.
@@ -217,14 +217,14 @@ impl Engine {
         let clause_id = self.clauses.len();
         for lit in &lits[..2] {
             if lit.is_positive() {
-                self.pos_watches[lit.var().0].push(ClauseId(clause_id));
+                self.pos_watches[*lit.var()].push(ClauseId::new(clause_id));
             } else {
-                self.neg_watches[lit.var().0].push(ClauseId(clause_id));
+                self.neg_watches[*lit.var()].push(ClauseId::new(clause_id));
             }
         }
         self.clauses.push(Clause { lits });
 
-        if true_lits.is_empty() && non_false_lits.len() == 1 && !self.enqueue(self.clauses[clause_id].lits[0], Some(ClauseId(clause_id))) {
+        if true_lits.is_empty() && non_false_lits.len() == 1 && !self.enqueue(self.clauses[clause_id].lits[0], Some(ClauseId::new(clause_id))) {
             return Err(PropagationError::Conflict { clause: self.clauses[clause_id].lits.clone() });
         }
 
@@ -250,14 +250,14 @@ impl Engine {
         self.propagated_vars.clear();
         self.enqueue(lit, None);
         while let Some(var) = self.prop_q.pop_front() {
-            let watches = if self.value(var) == LBool::True { mem::take(&mut self.neg_watches[var.0]) } else { mem::take(&mut self.pos_watches[var.0]) };
+            let watches = if self.value(var) == LBool::True { mem::take(&mut self.neg_watches[*var]) } else { mem::take(&mut self.pos_watches[*var]) };
             for i in 0..watches.len() {
                 if !self.propagate(watches[i], Lit::new(var, self.value(var) == LBool::True)) {
                     for &watch in watches.iter().skip(i) {
                         if self.value(var) == LBool::True {
-                            self.neg_watches[var.0].push(watch);
+                            self.neg_watches[*var].push(watch);
                         } else {
-                            self.pos_watches[var.0].push(watch);
+                            self.pos_watches[*var].push(watch);
                         }
                     }
                     self.prop_q.clear();
@@ -273,11 +273,11 @@ impl Engine {
             LBool::True => lit.is_positive(),
             LBool::False => !lit.is_positive(),
             LBool::Undef => {
-                self.assigns[lit.var().0] = if lit.is_positive() { LBool::True } else { LBool::False };
-                self.reason[lit.var().0] = reason;
+                self.assigns[*lit.var()] = if lit.is_positive() { LBool::True } else { LBool::False };
+                self.reason[*lit.var()] = reason;
                 self.propagated_vars.push(lit.var());
                 if lit.var() != self.decision_var {
-                    self.decision_vars[lit.var().0] = Some(self.decision_var);
+                    self.decision_vars[*lit.var()] = Some(self.decision_var);
                 }
                 self.prop_q.push_back(lit.var());
                 if let Some(listeners) = self.listeners.get(&lit.var()) {
@@ -299,7 +299,7 @@ impl Engine {
 
         loop {
             // 1. Process the current clause (either the conflict or a reason)
-            for lit in &self.clauses[clause.0].lits {
+            for lit in &self.clauses[*clause].lits {
                 let v = lit.var();
 
                 // Skip the variable we are currently resolving away
@@ -309,7 +309,7 @@ impl Engine {
 
                 if !seen.contains(&v) {
                     seen.insert(v);
-                    if self.decision_vars[v.0] == Some(self.decision_var) {
+                    if self.decision_vars[*v] == Some(self.decision_var) {
                         counter += 1;
                     } else {
                         // This literal comes from a previous decision level
@@ -323,9 +323,9 @@ impl Engine {
                 let v = self.propagated_vars.pop().expect("There should be a variable to resolve away");
                 if seen.contains(&v) {
                     let sign = self.value(v) == LBool::True;
-                    let reason = self.reason[v.0];
+                    let reason = self.reason[*v].expect("There should be a reason clause for this variable");
                     self.undo(v);
-                    break Some((Lit::new(v, sign), reason));
+                    break Some((Lit::new(v, sign), Some(reason)));
                 }
                 self.undo(v);
             };
@@ -354,37 +354,37 @@ impl Engine {
     ///
     /// This is mainly used internally during conflict analysis.
     pub fn undo(&mut self, var: VarId) {
-        self.assigns[var.0] = LBool::Undef;
-        self.reason[var.0] = None;
-        self.decision_vars[var.0] = None;
+        self.assigns[*var] = LBool::Undef;
+        self.reason[*var] = None;
+        self.decision_vars[*var] = None;
     }
 
     fn propagate(&mut self, clause_id: ClauseId, lit: Lit) -> bool {
         // Ensure the first literal is not the one that was just assigned
-        if self.clauses[clause_id.0].lits[0].var() == lit.var() {
-            self.clauses[clause_id.0].lits.swap(0, 1);
+        if self.clauses[*clause_id].lits[0].var() == lit.var() {
+            self.clauses[*clause_id].lits.swap(0, 1);
         }
         // Check if clause is already satisfied
-        if self.lit_value(&self.clauses[clause_id.0].lits[0]) == LBool::True {
+        if self.lit_value(&self.clauses[*clause_id].lits[0]) == LBool::True {
             // Re-add the clause to the watch list
             if lit.is_positive() {
-                self.pos_watches[lit.var().0].push(clause_id);
+                self.pos_watches[*lit.var()].push(clause_id);
             } else {
-                self.neg_watches[lit.var().0].push(clause_id);
+                self.neg_watches[*lit.var()].push(clause_id);
             }
             return true;
         }
 
         // Find the next unassigned literal
-        for i in 2..self.clauses[clause_id.0].lits.len() {
-            if self.lit_value(&self.clauses[clause_id.0].lits[i]) != LBool::False {
+        for i in 2..self.clauses[*clause_id].lits.len() {
+            if self.lit_value(&self.clauses[*clause_id].lits[i]) != LBool::False {
                 // Move this literal to the second position
-                self.clauses[clause_id.0].lits.swap(1, i);
+                self.clauses[*clause_id].lits.swap(1, i);
                 // Update watch lists
-                if self.clauses[clause_id.0].lits[1].is_positive() {
-                    self.pos_watches[self.clauses[clause_id.0].lits[1].var().0].push(clause_id);
+                if self.clauses[*clause_id].lits[1].is_positive() {
+                    self.pos_watches[*self.clauses[*clause_id].lits[1].var()].push(clause_id);
                 } else {
-                    self.neg_watches[self.clauses[clause_id.0].lits[1].var().0].push(clause_id);
+                    self.neg_watches[*self.clauses[*clause_id].lits[1].var()].push(clause_id);
                 }
                 return true;
             }
@@ -392,11 +392,11 @@ impl Engine {
 
         // If we reach here, the clause is either unit or unsatisfied
         if lit.is_positive() {
-            self.neg_watches[lit.var().0].push(clause_id);
+            self.neg_watches[*lit.var()].push(clause_id);
         } else {
-            self.pos_watches[lit.var().0].push(clause_id);
+            self.pos_watches[*lit.var()].push(clause_id);
         }
-        self.enqueue(self.clauses[clause_id.0].lits[0], Some(clause_id))
+        self.enqueue(self.clauses[*clause_id].lits[0], Some(clause_id))
     }
 
     /// Registers a callback invoked when `var` gets assigned.
@@ -629,13 +629,13 @@ mod tests {
         assert_eq!(format!("{}", LBool::Undef), "Undef");
 
         // Test Lit Display
-        let lit_pos = pos(VarId(5));
-        let lit_neg = neg(VarId(5));
+        let lit_pos = pos(VarId::new(5));
+        let lit_neg = neg(VarId::new(5));
         assert_eq!(format!("{}", lit_pos), "b5");
         assert_eq!(format!("{}", lit_neg), "¬b5");
 
         // Test Clause Display
-        let clause = Clause { lits: vec![pos(VarId(1)), neg(VarId(2)), pos(VarId(3))] };
+        let clause = Clause { lits: vec![pos(VarId::new(1)), neg(VarId::new(2)), pos(VarId::new(3))] };
         assert_eq!(format!("{}", clause), "b1 ∨ ¬b2 ∨ b3");
 
         // Test Engine Display
@@ -651,25 +651,25 @@ mod tests {
     fn test_lit_default_and_operators() {
         // Test Default
         let default_lit = Lit::default();
-        assert_eq!(default_lit.var(), VarId(usize::MAX));
+        assert_eq!(default_lit.var(), VarId::new(usize::MAX));
         assert!(!default_lit.is_positive());
 
         // Test Not operator
-        let lit = pos(VarId(3));
+        let lit = pos(VarId::new(3));
         let neg_lit = !lit;
-        assert_eq!(neg_lit.var(), VarId(3));
+        assert_eq!(neg_lit.var(), VarId::new(3));
         assert!(!neg_lit.is_positive());
 
         // Test Not operator on reference
-        let lit_ref = &pos(VarId(4));
+        let lit_ref = &pos(VarId::new(4));
         let neg_lit_ref = !lit_ref;
-        assert_eq!(neg_lit_ref.var(), VarId(4));
+        assert_eq!(neg_lit_ref.var(), VarId::new(4));
         assert!(!neg_lit_ref.is_positive());
 
         // Test PartialOrd
-        let lit1 = pos(VarId(1));
-        let lit2 = pos(VarId(2));
-        let lit3 = neg(VarId(1));
+        let lit1 = pos(VarId::new(1));
+        let lit2 = pos(VarId::new(2));
+        let lit3 = neg(VarId::new(1));
         assert!(lit1 < lit2);
         assert!(lit3 < lit1); // same var, but negative sorts before positive
     }
@@ -1001,7 +1001,7 @@ mod tests {
 
     #[test]
     fn test_clause_display_via_engine() {
-        let clause = Clause { lits: vec![pos(VarId(1)), neg(VarId(2)), pos(VarId(3))] };
+        let clause = Clause { lits: vec![pos(VarId::new(1)), neg(VarId::new(2)), pos(VarId::new(3))] };
 
         // Test that Clause Display formats correctly
         let output = format!("{}", clause);
@@ -1012,7 +1012,7 @@ mod tests {
     fn test_default_engine() {
         // Test that Engine::default() works
         let engine = Engine::default();
-        assert_eq!(engine.value(VarId(0)), LBool::True); // Variable 0 is forced to True in new()
+        assert_eq!(engine.value(VarId::new(0)), LBool::True); // Variable 0 is forced to True in new()
     }
 
     #[test]
