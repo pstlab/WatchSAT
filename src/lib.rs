@@ -27,14 +27,14 @@ mod lbool;
 mod lit;
 mod var;
 
+use crate::clause::{Clause, ClauseId};
+pub use lbool::LBool;
+pub use lit::{FALSE_LIT, Lit, TRUE_LIT, neg, pos};
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     fmt, mem,
 };
-
-use crate::clause::{Clause, ClauseId};
-pub use lbool::LBool;
-pub use lit::{FALSE_LIT, Lit, TRUE_LIT, neg, pos};
+use tracing::trace;
 pub use var::VarId;
 
 type Callback = Box<dyn Fn(VarId, LBool)>;
@@ -106,6 +106,7 @@ impl Engine {
 
     /// Adds a fresh variable and returns its identifier.
     pub fn add_var(&mut self) -> VarId {
+        trace!("Adding variable b{}", self.assigns.len());
         let var_id = self.assigns.len();
         self.assigns.push(LBool::default());
         self.reason.push(None);
@@ -169,6 +170,7 @@ impl Engine {
     /// when a unit clause contradicts current assignments.
     pub fn add_clause(&mut self, lits: impl IntoIterator<Item = Lit>) -> Result<(), PropagationError> {
         let mut lits = lits.into_iter().collect::<Vec<_>>();
+        trace!("Adding clause: {}", Clause { lits: lits.clone() });
         if lits.is_empty() {
             return Err(PropagationError::Conflict { clause: vec![] });
         } else if lits.len() == 1 {
@@ -245,6 +247,7 @@ impl Engine {
     /// Returns [`PropagationError::Conflict`] when propagation derives a
     /// contradiction. The returned clause is the analyzed learnt clause.
     pub fn assert(&mut self, lit: Lit) -> Result<(), PropagationError> {
+        trace!("Assert {}", lit);
         assert!(self.value(lit.var()) == LBool::Undef, "Variable b{} is already assigned", lit.var());
         self.decision_var = lit.var();
         self.propagated_vars.clear();
@@ -269,6 +272,7 @@ impl Engine {
     }
 
     fn enqueue(&mut self, lit: Lit, reason: Option<ClauseId>) -> bool {
+        trace!("Enqueue {} (reason: {:?})", lit, reason);
         match self.value(lit.var()) {
             LBool::True => lit.is_positive(),
             LBool::False => !lit.is_positive(),
@@ -360,6 +364,7 @@ impl Engine {
     }
 
     fn propagate(&mut self, clause_id: ClauseId, lit: Lit) -> bool {
+        trace!("Propagate {} in clause {}", lit, self.clauses[*clause_id]);
         // Ensure the first literal is not the one that was just assigned
         if self.clauses[*clause_id].lits[0].var() == lit.var() {
             self.clauses[*clause_id].lits.swap(0, 1);
