@@ -169,20 +169,21 @@ impl Engine {
     /// Returns [`PropagationError::Conflict`] when inserting an empty clause or
     /// when a unit clause contradicts current assignments.
     pub fn add_clause(&mut self, lits: impl IntoIterator<Item = Lit>) -> Result<(), PropagationError> {
-        let mut lits = lits.into_iter().collect::<Vec<_>>();
-        trace!("Adding clause: {}", Clause { lits: lits.clone() });
-        if lits.is_empty() {
+        let clause_id = ClauseId::new(self.clauses.len());
+        let mut clause = Clause { lits: lits.into_iter().collect::<Vec<_>>() };
+        trace!("Adding clause {}: {}", clause_id, clause);
+        if clause.lits.is_empty() {
             return Err(PropagationError::Conflict { clause: vec![] });
-        } else if lits.len() == 1 {
-            if !self.enqueue(lits[0], None) {
-                return Err(PropagationError::Conflict { clause: lits });
+        } else if clause.lits.len() == 1 {
+            if !self.enqueue(clause.lits[0], None) {
+                return Err(PropagationError::Conflict { clause: clause.lits });
             }
             return Ok(());
         }
 
         let mut true_lits = Vec::new();
         let mut non_false_lits = Vec::new();
-        for (idx, lit) in lits.iter().enumerate() {
+        for (idx, lit) in clause.lits.iter().enumerate() {
             match self.lit_value(lit) {
                 LBool::True => {
                     true_lits.push(idx);
@@ -194,7 +195,7 @@ impl Engine {
         }
 
         if non_false_lits.is_empty() {
-            return Err(PropagationError::Conflict { clause: lits });
+            return Err(PropagationError::Conflict { clause: clause.lits });
         }
 
         let first_watch = non_false_lits[0];
@@ -207,27 +208,26 @@ impl Engine {
         };
         let mut second = second_watch;
         if first_watch != 0 {
-            lits.swap(0, first_watch);
+            clause.lits.swap(0, first_watch);
             if second == 0 {
                 second = first_watch;
             }
         }
         if second != 1 {
-            lits.swap(1, second);
+            clause.lits.swap(1, second);
         }
 
-        let clause_id = self.clauses.len();
-        for lit in &lits[..2] {
+        for lit in &clause.lits[..2] {
             if lit.is_positive() {
-                self.pos_watches[*lit.var()].push(ClauseId::new(clause_id));
+                self.pos_watches[*lit.var()].push(clause_id);
             } else {
-                self.neg_watches[*lit.var()].push(ClauseId::new(clause_id));
+                self.neg_watches[*lit.var()].push(clause_id);
             }
         }
-        self.clauses.push(Clause { lits });
+        self.clauses.push(clause);
 
-        if true_lits.is_empty() && non_false_lits.len() == 1 && !self.enqueue(self.clauses[clause_id].lits[0], Some(ClauseId::new(clause_id))) {
-            return Err(PropagationError::Conflict { clause: self.clauses[clause_id].lits.clone() });
+        if true_lits.is_empty() && non_false_lits.len() == 1 && !self.enqueue(self.clauses[*clause_id].lits[0], Some(clause_id)) {
+            return Err(PropagationError::Conflict { clause: self.clauses[*clause_id].lits.clone() });
         }
 
         Ok(())
@@ -272,7 +272,7 @@ impl Engine {
     }
 
     fn enqueue(&mut self, lit: Lit, reason: Option<ClauseId>) -> bool {
-        trace!("Enqueue {} (reason: {:?})", lit, reason);
+        trace!("Enqueue {} (reason: {})", lit, reason.map_or("None".to_string(), |r| r.to_string()));
         match self.value(lit.var()) {
             LBool::True => lit.is_positive(),
             LBool::False => !lit.is_positive(),
