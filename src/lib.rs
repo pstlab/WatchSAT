@@ -22,11 +22,6 @@
 //!
 //! The API is intentionally low-level and focused on building blocks that can
 //! be embedded in higher-level planning or verification systems.
-mod clause;
-mod lbool;
-mod lit;
-mod var;
-
 use crate::clause::{Clause, ClauseId};
 pub use lbool::LBool;
 pub use lit::{FALSE_LIT, Lit, TRUE_LIT, neg, pos};
@@ -36,6 +31,11 @@ use std::{
 };
 use tracing::trace;
 pub use var::VarId;
+
+mod clause;
+mod lbool;
+mod lit;
+mod var;
 
 type Callback = Box<dyn Fn(VarId, LBool)>;
 
@@ -106,14 +106,14 @@ impl Engine {
 
     /// Adds a fresh variable and returns its identifier.
     pub fn add_var(&mut self) -> VarId {
-        trace!("Adding variable b{}", self.assigns.len());
-        let var_id = self.assigns.len();
+        let id = VarId::new(self.assigns.len());
+        trace!("Adding variable {}", id);
         self.assigns.push(LBool::default());
         self.reason.push(None);
         self.decision_vars.push(None);
         self.pos_watches.push(Vec::new());
         self.neg_watches.push(Vec::new());
-        VarId::new(var_id)
+        id
     }
 
     /// Returns the current assignment of a variable.
@@ -272,7 +272,7 @@ impl Engine {
     }
 
     fn enqueue(&mut self, lit: Lit, reason: Option<ClauseId>) -> bool {
-        trace!("Enqueue {} (reason: {})", lit, reason.map_or("None".to_string(), |r| r.to_string()));
+        trace!("Enqueue {}{}", lit, reason.map_or("".to_string(), |r| format!(" (reason: {})", r)));
         match self.value(lit.var()) {
             LBool::True => lit.is_positive(),
             LBool::False => !lit.is_positive(),
