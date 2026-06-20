@@ -78,7 +78,7 @@ pub enum PropagationError {
     /// Propagation or insertion produced an unsatisfied clause.
     ///
     /// The payload contains a clause explaining the conflict.
-    Conflict { clause: Vec<Lit> },
+    Conflict { clause: Box<[Lit]> },
 }
 
 impl Engine {
@@ -170,10 +170,10 @@ impl Engine {
     /// when a unit clause contradicts current assignments.
     pub fn add_clause(&mut self, lits: impl IntoIterator<Item = Lit>) -> Result<(), PropagationError> {
         let clause_id = ClauseId::new(self.clauses.len());
-        let mut clause = Clause { lits: lits.into_iter().collect::<Vec<_>>() };
+        let mut clause = Clause { lits: lits.into_iter().collect::<Vec<_>>().into_boxed_slice() };
         trace!("Adding clause {}: {}", clause_id, clause);
         if clause.lits.is_empty() {
-            return Err(PropagationError::Conflict { clause: vec![] });
+            return Err(PropagationError::Conflict { clause: clause.lits });
         } else if clause.lits.len() == 1 {
             if !self.enqueue(clause.lits[0], None) {
                 return Err(PropagationError::Conflict { clause: clause.lits });
@@ -294,7 +294,7 @@ impl Engine {
         }
     }
 
-    fn analyze_conflict(&mut self, mut clause: ClauseId) -> Vec<Lit> {
+    fn analyze_conflict(&mut self, mut clause: ClauseId) -> Box<[Lit]> {
         let mut seen = HashSet::new();
         let mut counter: usize = 0;
         let mut p: Option<(Lit, Option<ClauseId>)> = None;
@@ -351,7 +351,7 @@ impl Engine {
             self.undo(var);
         }
         self.undo(self.decision_var);
-        learnt
+        learnt.into_boxed_slice()
     }
 
     /// Clears the assignment of `var` and its implication metadata.
@@ -640,7 +640,7 @@ mod tests {
         assert_eq!(format!("{}", lit_neg), "¬b5");
 
         // Test Clause Display
-        let clause = Clause { lits: vec![pos(VarId::new(1)), neg(VarId::new(2)), pos(VarId::new(3))] };
+        let clause = Clause { lits: vec![pos(VarId::new(1)), neg(VarId::new(2)), pos(VarId::new(3))].into_boxed_slice() };
         assert_eq!(format!("{}", clause), "b1 ∨ ¬b2 ∨ b3");
 
         // Test Engine Display
@@ -1006,7 +1006,7 @@ mod tests {
 
     #[test]
     fn test_clause_display_via_engine() {
-        let clause = Clause { lits: vec![pos(VarId::new(1)), neg(VarId::new(2)), pos(VarId::new(3))] };
+        let clause = Clause { lits: vec![pos(VarId::new(1)), neg(VarId::new(2)), pos(VarId::new(3))].into_boxed_slice() };
 
         // Test that Clause Display formats correctly
         let output = format!("{}", clause);

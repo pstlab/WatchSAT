@@ -25,7 +25,7 @@ impl fmt::Display for ClauseId {
 }
 
 pub(super) struct Clause {
-    pub(super) lits: Vec<Lit>,
+    pub(super) lits: Box<[Lit]>,
 }
 
 impl fmt::Display for Clause {
